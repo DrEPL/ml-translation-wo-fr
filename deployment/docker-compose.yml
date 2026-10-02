@@ -1,0 +1,31 @@
+services:
+  translation-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nllb-translation-api
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_HOST: 0.0.0.0
+      FLASK_PORT: 5000
+      FLASK_DEBUG: "False"
+      MODEL_PATH: /app/model
+      MLFLOW_TRACKING_URI: ""
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./model:/app/model
+      - ./mlruns:/app/mlruns
+    networks:
+      - translation-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  translation-network:
+    driver: bridge

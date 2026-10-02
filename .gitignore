@@ -15,3 +15,14 @@ mlruns/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Secrets — ne jamais commiter !
+.env
+**/.env
+
+# Modèle local (weights trop lourds pour git)
+deployment/model/
+*.bin
+*.safetensors
+*.pt
+*.pth

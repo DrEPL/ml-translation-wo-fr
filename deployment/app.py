@@ -2,9 +2,15 @@
 API Flask pour l'inférence - Traduction FR ↔ WO avec NLLB-200-distilled-600M
 
 Architecture:
-- Charge le meilleur modèle depuis MLflow Model Registry
-- Expose un endpoint /predict pour l'inférence
+- Charge le modèle depuis le MLflow Model Registry (DagsHub) via MLFLOW_MODEL_URI
+  (ex: "models:/nllb-fr-wo-translation/latest")  — ou depuis un chemin local (fallback)
+- Expose les endpoints /predict et /batch-predict pour l'inférence
 - Gère les deux directions de traduction automatiquement
+
+Variables d'environnement :
+  MLFLOW_TRACKING_URI  : URI du serveur MLflow  (ex. https://dagshub.com/DrEPL/ml-translation-wo-fr.mlflow)
+  MLFLOW_MODEL_URI     : URI du modèle dans le Registry (ex. models:/nllb-fr-wo-translation/latest)
+  MODEL_PATH           : Chemin local (fallback si MLFLOW_MODEL_URI absent)  [défaut: /app/model]
 """
 
 from flask import Flask, request, jsonify
@@ -41,18 +47,29 @@ def before_request():
     if inference_engine is None:
         logger.info("Initialisation du modèle d'inférence...")
         try:
+            mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", None)
+            mlflow_model_uri = os.getenv(
+                "MLFLOW_MODEL_URI",
+                "models:/nllb-fr-wo-translation/latest"  # valeur par défaut
+            )
+            model_path = os.getenv("MODEL_PATH", "/app/model")
+
             inference_engine = TranslationInference(
-                model_path=os.getenv("MODEL_PATH", "/app/model"),
-                mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", None)
+                model_path=model_path,
+                mlflow_tracking_uri=mlflow_tracking_uri,
+                mlflow_model_uri=mlflow_model_uri,
             )
             model_info = {
-                "model_name": "nllb-200-distilled-600M",
+                "model_name": "nllb-fr-wo-translation",
+                "base_model": "facebook/nllb-200-distilled-600M",
                 "task": "translation_fr_wo",
                 "framework": "transformers",
                 "adapter": "lora",
+                "source": mlflow_model_uri or model_path,
+                "mlflow_tracking_uri": mlflow_tracking_uri,
                 "initialized_at": datetime.utcnow().isoformat(),
                 "device": str(torch.device("cuda" if torch.cuda.is_available() else "cpu")),
-                "cuda_available": torch.cuda.is_available()
+                "cuda_available": torch.cuda.is_available(),
             }
             logger.info("✓ Modèle initialisé avec succès")
         except Exception as e:

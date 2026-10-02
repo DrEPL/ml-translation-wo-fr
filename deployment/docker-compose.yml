@@ -10,12 +10,22 @@ services:
       FLASK_HOST: 0.0.0.0
       FLASK_PORT: 5000
       FLASK_DEBUG: "False"
-      MODEL_PATH: /app/model
-      MLFLOW_TRACKING_URI: ""
       PYTHONUNBUFFERED: "1"
+
+      # --- MLflow Model Registry (DagsHub) ---
+      MLFLOW_TRACKING_URI: "https://dagshub.com/DrEPL/ml-translation-wo-fr.mlflow"
+      MLFLOW_MODEL_URI: "models:/nllb-fr-wo-translation/latest"
+
+      # Jeton DagsHub — à injecter depuis un fichier .env ou secret CI/CD
+      # Ne jamais commiter la valeur réelle ici !
+      DAGSHUB_USER_TOKEN: "${DAGSHUB_USER_TOKEN}"
+
+      # Chemin local (fallback si MLflow inaccessible)
+      MODEL_PATH: /app/model
+
     volumes:
+      # Monte le dossier local 'model/' comme fallback hors-ligne
       - ./model:/app/model
-      - ./mlruns:/app/mlruns
     networks:
       - translation-network
     restart: on-failure
@@ -24,7 +34,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
 networks:
   translation-network:

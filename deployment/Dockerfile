@@ -21,6 +21,12 @@ ENV FLASK_HOST=0.0.0.0
 ENV FLASK_PORT=5000
 ENV MODEL_PATH=/app/model
 ENV PYTHONUNBUFFERED=1
+# MLflow Model Registry (DagsHub) — à surcharger via docker-compose ou -e
+ENV MLFLOW_TRACKING_URI=https://dagshub.com/DrEPL/ml-translation-wo-fr.mlflow
+ENV MLFLOW_MODEL_URI=models:/nllb-fr-wo-translation/latest
+# Jeton d'authentification DagsHub — obligatoire pour accéder au registry
+# À injecter via --env DAGSHUB_USER_TOKEN=<votre-token> ou docker-compose secrets
+ENV DAGSHUB_USER_TOKEN=
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1

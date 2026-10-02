@@ -4,8 +4,11 @@ torch==2.0.1
 transformers==4.36.2
 peft==0.7.1
 accelerate==0.25.0
-# huggingface-hub==0.20.3
 numpy==1.24.3
 gunicorn==21.2.0
 sentencepiece==0.1.99
 protobuf==3.20.3
+
+# MLflow + DagsHub pour le chargement depuis le Model Registry
+mlflow>=2.10.0
+dagshub>=0.3.8

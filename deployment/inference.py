@@ -116,58 +116,116 @@ class TranslationInference:
         self._load_model_and_tokenizer()
 
     # ------------------------------------------------------------------
-    # Résolution du chemin / téléchargement depuis MLflow
+    # Chargement depuis MLflow
     # ------------------------------------------------------------------
 
-    def _download_from_mlflow(self) -> str:
+    def _load_from_mlflow_registry(self) -> bool:
         """
-        Télécharge les artefacts du modèle depuis le MLflow Model Registry.
+        Charge le modèle et le tokenizer directement via mlflow.transformers.load_model().
 
-        Retourne le chemin local vers les artefacts téléchargés.
+        C'est la méthode recommandée quand le modèle a été loggé avec
+        mlflow.transformers.log_model(). Elle gère automatiquement la
+        structure interne des artefacts MLflow (sous-dossier model/, etc.).
+
+        Retourne True si le chargement a réussi, False sinon.
         """
-        import mlflow
-        import mlflow.pyfunc
+        try:
+            import mlflow
+            import mlflow.transformers
 
-        if self.mlflow_tracking_uri:
-            mlflow.set_tracking_uri(self.mlflow_tracking_uri)
-            logger.info(f"MLflow tracking URI défini : {self.mlflow_tracking_uri}")
+            if self.mlflow_tracking_uri:
+                mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+                logger.info(f"MLflow tracking URI défini : {self.mlflow_tracking_uri}")
 
-        logger.info(f"Téléchargement du modèle depuis MLflow : {self.mlflow_model_uri}")
+            logger.info(
+                f"Chargement du modèle via mlflow.transformers.load_model "
+                f"({self.mlflow_model_uri}) ..."
+            )
 
-        # Téléchargement des artefacts bruts (dossier contenant les fichiers du modèle)
-        local_path = mlflow.artifacts.download_artifacts(self.mlflow_model_uri)
-        logger.info(f"Artefacts téléchargés dans : {local_path}")
-        return local_path
+            components = mlflow.transformers.load_model(
+                self.mlflow_model_uri,
+                return_type="components",
+            )
 
-    def _resolve_local_path(self) -> Optional[str]:
+            # components est un dict : {"model": ..., "tokenizer": ..., ...}
+            self.model = components["model"]
+            self.tokenizer = components["tokenizer"]
+
+            logger.info("✓ Modèle et tokenizer chargés via MLflow transformers")
+            return True
+
+        except Exception as exc:
+            logger.warning(
+                f"mlflow.transformers.load_model a échoué : {exc}. "
+                f"Bascule sur le téléchargement d'artefacts bruts.",
+                exc_info=True,
+            )
+            return False
+
+    def _download_mlflow_artifacts(self) -> Optional[str]:
         """
-        Résout le chemin local vers les artefacts.
+        Télécharge les artefacts bruts et résout le dossier contenant config.json.
 
-        Priorité :
-        1. MLflow Model Registry (si mlflow_model_uri renseigné)
-        2. Chemin local model_path (si fourni et existant)
-        3. None → chargement du modèle de base uniquement
+        Retourne le chemin local vers le dossier du modèle HuggingFace, ou None.
         """
-        # --- 1. MLflow Registry ---
-        if self.mlflow_model_uri:
-            try:
-                return self._download_from_mlflow()
-            except Exception as exc:
-                logger.error(
-                    f"Échec du téléchargement depuis MLflow : {exc}",
-                    exc_info=True,
-                )
-                logger.warning("Bascule sur le chemin local si disponible.")
+        try:
+            import mlflow
 
-        # --- 2. Chemin local ---
-        if self.model_path and Path(self.model_path).exists():
-            logger.info(f"Utilisation du chemin local : {self.model_path}")
-            return self.model_path
+            if self.mlflow_tracking_uri:
+                mlflow.set_tracking_uri(self.mlflow_tracking_uri)
 
-        logger.warning(
-            "Ni MLflow Model URI ni chemin local valide. "
-            "Chargement du modèle de base NLLB uniquement (sans fine-tuning)."
-        )
+            logger.info(f"Téléchargement des artefacts depuis MLflow : {self.mlflow_model_uri}")
+            local_path = mlflow.artifacts.download_artifacts(self.mlflow_model_uri)
+            logger.info(f"Artefacts téléchargés dans : {local_path}")
+
+            # Chercher le dossier qui contient réellement config.json
+            # Structure typique mlflow.transformers.log_model() :
+            #   <root>/model/config.json
+            # Structure typique mlflow.log_artifacts() :
+            #   <root>/config.json  ou  <root>/lora_adapters/adapter_config.json
+            resolved = self._find_model_dir(local_path)
+            if resolved:
+                logger.info(f"Dossier modèle résolu : {resolved}")
+                return resolved
+
+            logger.warning(
+                f"Aucun config.json ou adapter_config.json trouvé dans {local_path}"
+            )
+            return None
+
+        except Exception as exc:
+            logger.error(f"Échec du téléchargement depuis MLflow : {exc}", exc_info=True)
+            return None
+
+    @staticmethod
+    def _find_model_dir(root: str) -> Optional[str]:
+        """
+        Recherche récursive du dossier contenant config.json ou adapter_config.json
+        dans l'arborescence d'artefacts MLflow.
+
+        Ordre de priorité :
+        1. Sous-dossiers connus : model/, lora_adapters/, nllb-merged-model/, merged/
+        2. Racine elle-même
+        3. Recherche récursive dans tous les sous-dossiers
+        """
+        root_path = Path(root)
+
+        # 1. Vérifier les sous-dossiers connus en premier
+        known_subdirs = ["model", "lora_adapters", "nllb-merged-model", "merged"]
+        for sub in known_subdirs:
+            candidate = root_path / sub
+            if (candidate / "config.json").exists() or (candidate / "adapter_config.json").exists():
+                return str(candidate)
+
+        # 2. Vérifier la racine
+        if (root_path / "config.json").exists() or (root_path / "adapter_config.json").exists():
+            return root
+
+        # 3. Recherche récursive
+        for config_name in ["config.json", "adapter_config.json"]:
+            for p in root_path.rglob(config_name):
+                return str(p.parent)
+
         return None
 
     # ------------------------------------------------------------------
@@ -175,87 +233,111 @@ class TranslationInference:
     # ------------------------------------------------------------------
 
     def _load_model_and_tokenizer(self):
-        """Charge le tokenizer et le modèle (avec LoRA si disponible)."""
+        """
+        Charge le tokenizer et le modèle.
 
-        resolved_path = self._resolve_local_path()
+        Stratégie (dans l'ordre) :
+        1. mlflow.transformers.load_model()  — méthode recommandée
+        2. Téléchargement d'artefacts MLflow + chargement HuggingFace manuel
+        3. Chemin local (MODEL_PATH)
+        4. Modèle de base NLLB uniquement (sans fine-tuning)
+        """
 
-        # ---- Tokenizer ----
-        # On essaie d'abord depuis le dossier résolu (inclut vocab NLLB custom)
-        tokenizer_source = resolved_path if resolved_path else self.base_model_name
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                tokenizer_source, trust_remote_code=True
-            )
-            logger.info(f"Tokenizer chargé depuis : {tokenizer_source}")
-        except Exception:
-            logger.warning(
-                f"Impossible de charger le tokenizer depuis {tokenizer_source}. "
-                f"Bascule sur {self.base_model_name}."
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.base_model_name, trust_remote_code=True
-            )
-            logger.info(f"Tokenizer chargé depuis : {self.base_model_name}")
-
-        # ---- Modèle ----
         torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
         device_map = "auto" if self.device == "cuda" else None
 
-        if resolved_path is None:
-            # Aucun fine-tuning disponible → modèle de base uniquement
-            logger.info(f"Chargement modèle de base : {self.base_model_name}")
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+        # ============================================================
+        # 1. MLflow transformers.load_model (méthode recommandée)
+        # ============================================================
+        if self.mlflow_model_uri:
+            if self._load_from_mlflow_registry():
+                # Déplacer le modèle sur le bon device
+                if device_map is None:
+                    self.model = self.model.to(self.device)
+                self.model.eval()
+                logger.info("✓ Modèle et tokenizer prêts (via MLflow load_model)")
+                return
+
+            # ========================================================
+            # 2. Fallback : téléchargement d'artefacts + chargement manuel
+            # ========================================================
+            resolved_path = self._download_mlflow_artifacts()
+            if resolved_path:
+                self._load_from_local_dir(resolved_path, torch_dtype, device_map)
+                return
+
+            logger.warning("Toutes les méthodes MLflow ont échoué. Bascule sur le chemin local.")
+
+        # ============================================================
+        # 3. Chemin local
+        # ============================================================
+        if self.model_path and Path(self.model_path).exists():
+            logger.info(f"Utilisation du chemin local : {self.model_path}")
+            # Résoudre le bon sous-dossier si nécessaire
+            resolved = self._find_model_dir(self.model_path) or self.model_path
+            self._load_from_local_dir(resolved, torch_dtype, device_map)
+            return
+
+        # ============================================================
+        # 4. Erreur (pas de fallback)
+        # ============================================================
+        raise RuntimeError(
+            "Aucune source fine-tunée disponible (ni MLflow, ni locale). "
+            "Le basculement sur le modèle de base a été désactivé à la demande de l'utilisateur."
+        )
+
+    def _load_from_local_dir(self, resolved_path: str, torch_dtype, device_map):
+        """Charge le modèle et le tokenizer depuis un dossier local résolu."""
+
+        # ---- Tokenizer ----
+        tokenizer_path = resolved_path
+        
+        # Structure MLflow: si le modèle est dans <root>/model, le tokenizer est souvent dans <root>/components/tokenizer
+        parent_dir = Path(resolved_path).parent
+        if (parent_dir / "components" / "tokenizer").exists():
+            tokenizer_path = str(parent_dir / "components" / "tokenizer")
+        elif (Path(resolved_path) / "components" / "tokenizer").exists():
+            tokenizer_path = str(Path(resolved_path) / "components" / "tokenizer")
+            
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_path, trust_remote_code=True
+            )
+            logger.info(f"Tokenizer chargé depuis : {tokenizer_path}")
+        except Exception as exc:
+            logger.error(
+                f"Tokenizer non trouvé dans {tokenizer_path}. "
+                f"Pas de bascule sur le modèle de base autorisée."
+            )
+            raise RuntimeError(f"Impossible de charger le tokenizer depuis {tokenizer_path}") from exc
+
+        # ---- Modèle ----
+        has_lora = (Path(resolved_path) / "adapter_config.json").exists()
+
+        if has_lora:
+            logger.info(
+                f"Chargement modèle de base ({self.base_model_name}) "
+                f"+ adapters LoRA ({resolved_path})"
+            )
+            base = AutoModelForSeq2SeqLM.from_pretrained(
                 self.base_model_name,
                 torch_dtype=torch_dtype,
                 device_map=device_map,
             )
-
+            self.model = PeftModel.from_pretrained(
+                base, resolved_path, device_map=device_map
+            )
+            logger.info("✓ Adapters LoRA chargés avec succès")
         else:
-            adapter_config = Path(resolved_path) / "adapter_config.json"
+            logger.info(f"Chargement modèle fusionné depuis : {resolved_path}")
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                resolved_path,
+                torch_dtype=torch_dtype,
+                device_map=device_map,
+            )
 
-            # Chercher dans les sous-dossiers typiques si l'artefact MLflow
-            # contient un sous-répertoire (ex. "lora_adapters/", "nllb-merged-model/")
-            if not adapter_config.exists():
-                for sub in ["lora_adapters", "nllb-merged-model", "merged"]:
-                    candidate = Path(resolved_path) / sub
-                    if (candidate / "adapter_config.json").exists():
-                        resolved_path = str(candidate)
-                        adapter_config = candidate / "adapter_config.json"
-                        logger.info(f"Sous-dossier détecté : {resolved_path}")
-                        break
-
-            has_lora = adapter_config.exists()
-
-            if has_lora:
-                # Adapters LoRA → charger base + adapter
-                logger.info(
-                    f"Chargement modèle de base ({self.base_model_name}) "
-                    f"+ adapters LoRA ({resolved_path})"
-                )
-                base = AutoModelForSeq2SeqLM.from_pretrained(
-                    self.base_model_name,
-                    torch_dtype=torch_dtype,
-                    device_map=device_map,
-                )
-                self.model = PeftModel.from_pretrained(
-                    base,
-                    resolved_path,
-                    device_map=device_map,
-                )
-                logger.info("✓ Adapters LoRA chargés avec succès")
-            else:
-                # Modèle fusionné
-                logger.info(f"Chargement modèle fusionné depuis : {resolved_path}")
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                    resolved_path,
-                    torch_dtype=torch_dtype,
-                    device_map=device_map,
-                )
-
-        # Passer sur le device si device_map n'a pas déjà géré ça
         if device_map is None:
             self.model = self.model.to(self.device)
-
         self.model.eval()
         logger.info("✓ Modèle et tokenizer prêts")
 

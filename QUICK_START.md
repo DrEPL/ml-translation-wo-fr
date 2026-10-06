@@ -30,6 +30,9 @@ docker-compose up
 
 gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 2 --worker-class gthread --timeout 120 --access-logfile - --error-logfile - app:app
 
+
+uvicorn app:app --host 0.0.0.0 --port 5000 --reload
+
 1. **Tester l'API**
 ```bash
 curl http://localhost:5000/health

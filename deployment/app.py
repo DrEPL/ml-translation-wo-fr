@@ -47,12 +47,15 @@ def before_request():
     if inference_engine is None:
         logger.info("Initialisation du modèle d'inférence...")
         try:
-            mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", None)
+            mlflow_tracking_uri = os.getenv(
+                "MLFLOW_TRACKING_URI",
+                "https://dagshub.com/DrEPL/ml-translation-wo-fr.mlflow",
+            )
             mlflow_model_uri = os.getenv(
                 "MLFLOW_MODEL_URI",
-                "models:/nllb-fr-wo-translation/latest"  # valeur par défaut
+                "models:/nllb-fr-wo-translation/latest",
             )
-            model_path = os.getenv("MODEL_PATH", "/app/model")
+            model_path = os.getenv("MODEL_PATH", "./model")
 
             inference_engine = TranslationInference(
                 model_path=model_path,

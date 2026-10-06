@@ -1,0 +1,481 @@
+{
+  "info": {
+    "name": "ML Translation WO-FR API - Suite de Tests Automatisés",
+    "description": "Collection de tests automatisés complets pour l'API Flask de Traduction Français-Wolof (NLLB-200 / LoRA).\nInclus : Tests de santé, info modèle, prédictions simples et batchs (cas nominaux, limites et erreurs).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "description": "Base URL de l'API Flask"
+    },
+    {
+      "key": "last_source_text",
+      "value": "",
+      "description": "Stocke dynamiquement le dernier texte traduit"
+    },
+    {
+      "key": "last_translated_text",
+      "value": "",
+      "description": "Stocke dynamiquement la dernière traduction obtenue"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Health Check & System Info",
+      "item": [
+        {
+          "name": "GET /health - Check Server Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is valid JSON', function () {",
+                  "    pm.response.to.be.json;",
+                  "});",
+                  "",
+                  "pm.test('Health status is healthy', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('healthy');",
+                  "    pm.expect(jsonData.model_loaded).to.be.a('boolean');",
+                  "    pm.expect(jsonData.cuda_available).to.be.a('boolean');",
+                  "    pm.expect(jsonData.timestamp).to.be.a('string');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "GET /model-info - Retrieve Model Information",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Model info structure is valid', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('info');",
+                  "    pm.expect(jsonData).to.have.property('timestamp');",
+                  "    ",
+                  "    var info = jsonData.info;",
+                  "    pm.expect(info.model_name).to.eql('nllb-200-distilled-600M');",
+                  "    pm.expect(info.task).to.eql('translation_fr_wo');",
+                  "    pm.expect(info.framework).to.eql('transformers');",
+                  "    pm.expect(info.adapter).to.eql('lora');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/model-info",
+              "host": ["{{base_url}}"],
+              "path": ["model-info"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Single Translation (/predict) - Cas Nominaux",
+      "item": [
+        {
+          "name": "POST /predict - Auto-Detect & Translate FR to WO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Prediction payload format and fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.source_text).to.eql('Bonjour tout le monde');",
+                  "    pm.expect(jsonData.translated_text).to.be.a('string').and.not.empty;",
+                  "    pm.expect(jsonData.source_lang).to.eql('fr');",
+                  "    pm.expect(jsonData.target_lang).to.eql('wo');",
+                  "    pm.expect(jsonData.processing_time_ms).to.be.a('number').and.above(0);",
+                  "    ",
+                  "    // Sauvegarde dynamique des variables pour réutilisation dans les tests suivants",
+                  "    pm.collectionVariables.set('last_source_text', jsonData.source_text);",
+                  "    pm.collectionVariables.set('last_translated_text', jsonData.translated_text);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Bonjour tout le monde\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        },
+        {
+          "name": "POST /predict - Explicit Languages WO to FR with Beams",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('WO to FR explicit translation success', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.source_text).to.eql('Naka suba si');",
+                  "    pm.expect(jsonData.source_lang).to.eql('wo');",
+                  "    pm.expect(jsonData.target_lang).to.eql('fr');",
+                  "    pm.expect(jsonData.translated_text).to.be.a('string').and.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Naka suba si\",\n  \"source_lang\": \"wo\",\n  \"target_lang\": \"fr\",\n  \"num_beams\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Batch Translation (/batch-predict) - Cas Nominaux",
+      "item": [
+        {
+          "name": "POST /batch-predict - Translate Multiple Sentences",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Batch response validation', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.total_texts).to.eql(3);",
+                  "    pm.expect(jsonData.successful).to.eql(3);",
+                  "    pm.expect(jsonData.results).to.be.an('array').with.lengthOf(3);",
+                  "    ",
+                  "    jsonData.results.forEach(function(item) {",
+                  "        pm.expect(item.success).to.be.true;",
+                  "        pm.expect(item.translated_text).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts\": [\n    \"Comment vas-tu ?\",\n    \"Merci beaucoup pour ton aide\",\n    \"A la prochaine fois\"\n  ],\n  \"source_lang\": \"fr\",\n  \"target_lang\": \"wo\",\n  \"num_beams\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/batch-predict",
+              "host": ["{{base_url}}"],
+              "path": ["batch-predict"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Tests de Cas d'Erreur & Validation Métier",
+      "item": [
+        {
+          "name": "POST /predict - Missing Required Field 'text'",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message specifies missing text field', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "    pm.expect(jsonData.error).to.include(\"Field 'text' is required\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_lang\": \"fr\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        },
+        {
+          "name": "POST /predict - Empty Text String",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message specifies text cannot be empty', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include('cannot be empty');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"   \"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        },
+        {
+          "name": "POST /predict - Invalid Content-Type (Not JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error specifies Content-Type must be application/json', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include('Content-Type must be application/json');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "text=Bonjour"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        },
+        {
+          "name": "POST /predict - Exceeding Max Character Limit (>1000 chars)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message specifies max length overflow', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include('exceeds max length of 1000');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/predict",
+              "host": ["{{base_url}}"],
+              "path": ["predict"]
+            }
+          }
+        },
+        {
+          "name": "POST /batch-predict - Invalid Format for 'texts'",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 Bad Request', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message specifies texts must be a list', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.include(\"Field 'texts' must be a list\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts\": \"invalid_string_instead_of_array\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/batch-predict",
+              "host": ["{{base_url}}"],
+              "path": ["batch-predict"]
+            }
+          }
+        },
+        {
+          "name": "GET /unknown-endpoint - Non Existing Resource (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404 Not Found', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test('Returns JSON error object for 404', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.error).to.eql('Endpoint not found');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/non-existing-path",
+              "host": ["{{base_url}}"],
+              "path": ["non-existing-path"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
